@@ -1,0 +1,190 @@
+#!/usr/bin/env python
+import sys,time,argparse,os
+
+def main(args):
+	args = do_inputs()
+	udir = os.path.dirname(os.path.realpath(__file__)) + "/../utilities/"
+	sys.stdout.write("### MeRipBox Single-end sequencing data\n")
+        sys.stdout.write("\n### Start analysis: " + time.strftime("%a,%d %b %Y %H:%M:%S") + "\n")
+        sys.stdout.flush()
+	t = args.thread
+	if args.output.endswith("/"):
+		qc_fd,an_fd,qf_fd,pk_fd,mf_fd = [args.output+"QC/",args.output+"Alignment/",args.output+"Quantification/",args.output+"Peak/",args.output+"Motif/"]
+	else:
+		qc_fd,an_fd,qf_fd,pk_fd,mf_fd = [args.output+"/QC/",args.output+"/Alignment/",args.output+"/Quantification/",args.output+"/Peak/",args.output+"/Motif/"]
+	input_1,ip_1 = [args.inputR,args.ipR]
+	sys.stdout.write("\n## Step 1.1: create folders and perform quality control: " + time.strftime("%a,%d %b %Y %H:%M:%S") + "\n\n")
+	sys.stdout.flush()
+	cmd0 = "mkdir -p " + " ".join([qc_fd,an_fd,qf_fd,pk_fd,mf_fd]) 
+	args.script.write("\n".join(["## Step 1.1: create folders and perform quality control",cmd0])+"\n")
+        args.script.flush()
+	os.system(cmd0) # create output folder
+
+	# quality control
+	cmd1_11 = "fastqc -f fastq -t " + t + " -o " + qc_fd + " " + input_1
+	cmd1_12 = "fastqc -f fastq -t " + t + " -o " + qc_fd + " " + ip_1
+	args.script.write("\n".join([cmd1_11,cmd1_12])+"\n")
+	args.script.flush()
+	os.system(cmd1_11)
+	os.system(cmd1_12)
+
+	# trim adapter	
+	sys.stdout.write("\n\n## Step 1.2: trim adapters: " + time.strftime("%a,%d %b %Y %H:%M:%S") + "\n\n")
+	sys.stdout.flush()
+	cn_input_1,cn_ip_1 = [qc_fd+args.name+"_Input.R1.trim.fastq.gz",qc_fd+args.name+"_IP.R1.trim.fastq.gz"]
+	cmd1_21 = "cutadapt -a " + args.aseq1 + " -q 20,20 -m 20 --max-n 0.01 --trim-n -o " + cn_input_1 + " " + input_1 + " >" + args.name + ".logfile.remove-adapter.Input.txt"
+	cmd1_22 = "cutadapt -a " + args.aseq1 + " -q 20,20 -m 20 --max-n 0.01 --trim-n -o " + cn_ip_1 + " " + ip_1 + " >" + args.name + ".logfile.remove-adapter.IP.txt"
+	args.script.write("\n".join(["## Step 1.2: trim adapters",cmd1_21,cmd1_22])+"\n")
+        args.script.flush()
+	os.system(cmd1_21)
+	os.system(cmd1_22)
+
+	# alignment
+	sys.stdout.write("\n## Step 2: alignment: " + time.strftime("%a,%d %b %Y %H:%M:%S") + "\n\n")
+	sys.stdout.flush()
+	sam_input,sam_ip = [an_fd+args.name+"_Input.sam",an_fd+args.name+"_IP.sam"]
+	cmd2_1 = "hisat2 -5 8 -p " + t + " -x " + args.ref + " -U " + cn_input_1 + " -S " + sam_input + " --summary-file " + args.name + ".logfile.alignment.Input.txt"
+	cmd2_2 = "hisat2 -5 8 -p " + t + " -x " + args.ref + " -U " + cn_ip_1 + " -S " + sam_ip + " --summary-file " + args.name + ".logfile.alignment.IP.txt"
+	args.script.write("\n".join(["## Step 2: alignment",cmd2_1,cmd2_2])+"\n")
+        args.script.flush()
+	sys.stdout.write("# Alignment summary: Input sample\n")
+	sys.stdout.flush()
+	os.system(cmd2_1)
+	sys.stdout.write("\n# Alignment summary: IP sample\n")
+	sys.stdout.flush()
+	os.system(cmd2_2)
+
+	# get unique alignment
+	sys.stdout.write("\n\n## Step 3.1: get unique alignment: " + time.strftime("%a,%d %b %Y %H:%M:%S") + "\n\n")
+	sys.stdout.flush()
+	sam1_input,sam1_ip = [an_fd+args.name+"_Input.uniq.sam",an_fd+args.name+"_IP.uniq.sam"]
+	cmd3_11 = "python " + udir + "py_extract_unique_alignment_hisat2.single-end.py " + sam_input + " " + sam1_input
+	cmd3_12 = "python " + udir + "py_extract_unique_alignment_hisat2.single-end.py " + sam_ip + " " + sam1_ip
+	args.script.write("\n".join(["## Step 3.1: get unique alignment",cmd3_11,cmd3_12])+"\n")
+        args.script.flush()
+	os.system(cmd3_11)
+	os.system(cmd3_12)
+
+	# remove PCR duplicates
+	sys.stdout.write("\n## Step 3.2: remove PCR duplicates: " + time.strftime("%a,%d %b %Y %H:%M:%S") + "\n\n")
+	sys.stdout.flush()	
+	# sort bam
+	bam2_input,bam2_ip = [an_fd+args.name+"_Input.uniq.sort.bam",an_fd+args.name+"_IP.uniq.sort.bam"]
+	cmd3_31 = "samtools sort -O BAM -@ " + t + " -o " + bam2_input + " " + sam1_input
+	cmd3_32 = "samtools sort -O BAM -@ " + t + " -o " + bam2_ip + " " + sam1_ip
+	# index bam
+	cmd3_41 = "samtools index " + bam2_input
+	cmd3_42 = "samtools index " + bam2_ip
+	# remove PCR duplicate
+	bam3_input,bam3_ip = [an_fd+args.name+"_Input.uniq.sort.rd.bam",an_fd+args.name+"_IP.uniq.sort.rd.bam"]
+	cmd3_51 = "samtools markdup -r -O BAM -@ " + t + " -s " + bam2_input + " " + bam3_input
+	cmd3_52 = "samtools markdup -r -O BAM -@ " + t + " -s " + bam2_ip + " " + bam3_ip
+	# index bam
+	cmd3_61 = "samtools index " + bam3_input
+	cmd3_62 = "samtools index " + bam3_ip
+	# stat bam
+	stat1_input,stat1_ip = [an_fd+args.name+"_Input.uniq.sort.rd.stat",an_fd+args.name+"_IP.uniq.sort.rd.stat"]
+	cmd3_71 = "samtools stats " + bam3_input + " >" + stat1_input
+	cmd3_72 = "samtools stats " + bam3_ip + " >" + stat1_ip
+	args.script.write("\n".join(["## Step 3.2: remove PCR duplicates",cmd3_31,cmd3_32,cmd3_41,cmd3_42,cmd3_51,cmd3_52,cmd3_61,cmd3_62,cmd3_71,cmd3_72])+"\n")
+	args.script.flush()
+	os.system(cmd3_31)
+        os.system(cmd3_32)
+	os.system(cmd3_41)
+        os.system(cmd3_42)
+	os.system(cmd3_51)
+        os.system(cmd3_52)
+	os.system(cmd3_61)
+        os.system(cmd3_62)
+	os.system(cmd3_71)
+	os.system(cmd3_72)
+
+	# remove rRNA derived reads
+	sys.stdout.write("\n\n## Step 3.3: remove rRNA-derived reads: " + time.strftime("%a,%d %b %Y %H:%M:%S") + "\n\n")
+	sys.stdout.flush()	
+	bam4_input,bam4_ip = [an_fd+args.name+"_Input.uniq.sort.rd.rr.bam",an_fd+args.name+"_IP.uniq.sort.rd.rr.bam"]	
+	cmd3_81 = "bedtools intersect -a " + bam3_input + " -b " + args.annR + " -v >" + bam4_input
+	cmd3_82 = "bedtools intersect -a " + bam3_ip + " -b " + args.annR + " -v >" + bam4_ip
+	# index bam
+	cmd3_91 = "samtools index " + bam4_input
+	cmd3_92 = "samtools index " + bam4_ip
+	# stat bam
+	stat2_input,stat2_ip = [an_fd+args.name+"_Input.uniq.sort.rd.rr.stat",an_fd+args.name+"_IP.uniq.sort.rd.rr.stat"]
+	cmd3_141 = "samtools stats " + bam4_input + " >" + stat2_input
+	cmd3_142 = "samtools stats " + bam4_ip + " >" + stat2_ip
+	args.script.write("\n".join(["## Step 3.3: remove rRNA-derived reads",cmd3_81,cmd3_82,cmd3_91,cmd3_92,cmd3_141,cmd3_142])+"\n")
+	args.script.flush()
+	os.system(cmd3_81)
+	os.system(cmd3_82)
+	os.system(cmd3_91)
+        os.system(cmd3_92)
+	os.system(cmd3_141)
+        os.system(cmd3_142)
+
+	# make bigWig file
+	sys.stdout.write("\n## Step 3.4: make bigWig file: " + time.strftime("%a,%d %b %Y %H:%M:%S") + "\n\n")
+	sys.stdout.flush()
+	bw_input,bw_ip = [an_fd+args.name+"_Input.uniq.sort.rd.rr.RPKM.bigWig",an_fd+args.name+"_IP.uniq.sort.rd.rr.RPKM.bigWig"]
+	cmd3_151 = "bamCoverage -bs 10 --normalizeUsing RPKM -p " + t + " -b " + bam4_input + " -o " + bw_input
+	cmd3_152 = "bamCoverage -bs 10 --normalizeUsing RPKM -p " + t + " -b " + bam4_ip + " -o " + bw_ip
+	args.script.write("\n".join(["## Step 3.4: make bigWig file",cmd3_151,cmd3_152])+"\n")
+	args.script.flush()
+	os.system(cmd3_151)
+	os.system(cmd3_152)
+
+	# quantification
+	sys.stdout.write("\n\n## Step 4: quantify gene expression by Input sample: " + time.strftime("%a,%d %b %Y %H:%M:%S") + "\n\n")
+	sys.stdout.flush()
+	cmd4 = "stringtie " + bam4_input + " -e -p " + t + " -G " + args.annGG + " -o " + qf_fd + args.name + ".gtf -A " + qf_fd + args.name + ".gene-abundance.txt"
+	args.script.write("\n".join(["## Step 4: quantify gene expression by Input sample",cmd4])+"\n")
+        args.script.flush()
+	os.system(cmd4)
+
+	# peak calling
+	sys.stdout.write("\n## Step 5: call peaks: " + time.strftime("%a,%d %b %Y %H:%M:%S") + "\n\n")
+	sys.stdout.flush()
+	cmd5 = "macs2 callpeak -f BAM --keep-dup all --nomodel --call-summits -g " + args.gsize + " -n " + args.name + " --outdir " + pk_fd + " -t " + bam4_ip + " -c " + bam4_input
+	args.script.write("\n".join(["## Step 5: call peaks",cmd5])+"\n")
+        args.script.flush()
+	os.system(cmd5)
+
+	# motif search
+	sys.stdout.write("\n\n## Step 6: search motifs: " + time.strftime("%a,%d %b %Y %H:%M:%S") + "\n\n")
+	sys.stdout.flush()
+	smt = pk_fd + args.name + "_summits.bed"
+	bed1 = mf_fd + args.name + ".bed"
+	cmd6_1 = "bedtools intersect -a " + smt + " -b " + args.annGB + " -wao | cut -f1-5,12|uniq -c >" + bed1
+	bed2 = mf_fd + args.name + ".strand.bed"
+	cmd6_2 = "python " + udir + "py_assign_strand2peak.py " + bed1 + " " + bed2 # modify code
+	cmd6_3 = "findMotifsGenome.pl " + bed2 + " " + args.refv + " " + mf_fd + " -len 5,6,7,8 -mset all -rna -p " + t
+	args.script.write("\n".join(["## Step 6: search motifs",cmd6_1,cmd6_2,cmd6_3])+"\n")
+        args.script.flush()
+	os.system(cmd6_1)
+	os.system(cmd6_2)
+	os.system(cmd6_3)
+        
+	sys.stdout.write("\n### Finish analysis: " + time.strftime("%a,%d %b %Y %H:%M:%S") + "\n")
+        sys.stdout.flush()
+
+def do_inputs():
+        parser = argparse.ArgumentParser(description="Function: analyze MeRIP-seq data with single-end mode",formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+	parser.add_argument('-v','--version',action='version',version='MeRipBox (version 0.1)')
+	parser.add_argument('-n','--name',type=str,default="test_SE",help="Experiment name, which will be used to name output files")
+	parser.add_argument('-o','--output',type=str,default="test_SE",help="Output folder to save all output files")
+	parser.add_argument('-t','--thread',type=str,default="1",help="Number of threads")
+        parser.add_argument('-inputR','--inputR',type=str,required=True,help="INPUT sample; fastq.gz format")
+	parser.add_argument('-ipR','--ipR',type=str,required=True,help="IP sample; fastq.gz format")
+	parser.add_argument('-a','--aseq1',type=str,default="AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC",help="Trim adapter by Cutadapt: sequence of an adapter that was ligated to the 3 end")
+	parser.add_argument('-x','--ref',type=str,required=True,help="Alignment by Hisat2: Hisat2 index filename prefix")
+	parser.add_argument('-annR','--annR',type=str,required=True,help="Remove rRNA-derived reads by Bedtools intersect: Annotation of rRNA in BED format")
+	parser.add_argument('-annGG','--annGG',type=str,required=True,help="Quantification by Stringtie: Annotation of genes in GTF format")
+	parser.add_argument('-g','--gsize',type=str,required=True,help="Peak calling by Macs2 callpeak: Effective transcriptome size (bp). We use 242010196 for mouse, 117608789 for zebrafish")
+	parser.add_argument('-annGB','--annGB',type=str,required=True,help="Assign strand to peaks for motif finding by Bedtools intersect: Annotation of genes in BED format")
+	parser.add_argument('-rv','--refv',type=str,required=True,help="Motif finding by Homer findMotifsGenome.pl: Reference genome version. We use mm10 for mouse, danRer11 for zebrafish")
+	parser.add_argument('-s','--script',type=argparse.FileType('w'),required=True,help="Output file to save all scripts")
+        args = parser.parse_args()
+        return args
+
+if __name__=="__main__":
+        args = do_inputs()
+        main(args)
