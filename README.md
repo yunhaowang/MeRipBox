@@ -19,7 +19,7 @@ MeRIP-seq (N6-methyladenosine/m6A specific methylated RNA immunoprecipitation fo
 
 - HISAT2 (v2.1.0) (http://daehwankimlab.github.io/hisat2/download/#version-hisat2-210)
 
-- SAMtools (v1.0) (https://sourceforge.net/projects/samtools/files/samtools/1.0/)
+- SAMtools (v1.9) (https://sourceforge.net/projects/samtools/files/samtools/1.9/)
 
 - BEDTools (v2.28.0) (https://github.com/arq5x/bedtools2/releases)
 
